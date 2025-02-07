@@ -3,16 +3,28 @@ from tqdm import tqdm
 from torch.nn import MSELoss, SmoothL1Loss, L1Loss
 from torchmetrics.functional import peak_signal_noise_ratio,structural_similarity_index_measure
 import wandb
-from util.util import get_logger,mkdirs,save_images,ssim_xy,compute_ssim,compute_rmse,compute_psnr2D
+from util.util import get_logger,mkdirs,compute_ssim,compute_rmse,compute_psnr2D, load_checkpoint, load_start_epoch
 import os
 import math
 import pytorch_ssim
 import ipdb
-
-
+from glob import glob
 
 
 def train(opt,model,optimizer,lr_scheduler,loss_fn,trainloader,testloader,device):
+
+    if opt.resume: 
+        model_root=opt.model_path
+        model_path = glob(os.path.join(model_root, str(opt.checkpoint) + "*"))[0]
+        if model_path is None:
+            raise ValueError(f"No model with checkpoint {opt.checkpoint} found in {model_root}")
+        else:         
+            print("Resume from "+model_path)
+            model.load_state_dict(torch.load(model_path,map_location='cuda:{}'.format(opt.gpu_ids[0])),strict=False)
+            start_epoch = opt.checkpoint + 1 
+    else: 
+        print("Training from scratch")
+        start_epoch = 0
     
     if opt.use_wandb:
         wandb.init(project='litformer_review',name=opt.name)
@@ -26,10 +38,10 @@ def train(opt,model,optimizer,lr_scheduler,loss_fn,trainloader,testloader,device
     train_total_iters = 0
     val_total_iters = 0
     Lambda=2
-    for epoch in tqdm(range(opt.epochs)):
+    for epoch in tqdm(range(start_epoch, opt.epochs + 1)):
         train_length=len(trainloader.dataset)
         val_length=len(testloader.dataset)
-        epoch_iter = 0                  # the number of training iterations in current epoch, reset to 0 every epoch
+        epoch_iter = 0                  #the number of training iterations in current epoch, reset to 0 every epoch
         
         running_loss = 0
         running_psnr3d=0
@@ -137,22 +149,21 @@ def train(opt,model,optimizer,lr_scheduler,loss_fn,trainloader,testloader,device
         lr_scheduler.step()
         if opt.use_wandb:
             wandb.log({"epoch_train_loss": epoch_loss,
-                        'epoch_train_psnr':epoch_psnr,
-                        'epoch_train_ssim':epoch_ssim,
+                        'epoch_train_psnr':epoch_psnr3d,
+                        'epoch_train_ssim':epoch_ssim3d,
                         "epoch_test_loss":epoch_test_loss,
                         'epoch_test_psnr':epoch_test_psnr3d,
                         'epoch_test_ssim':epoch_test_ssim3d,
                         'epoch':epoch
                         } )
 #save model
-        if epoch%5==0:
+        if epoch%5==0 and epoch>0:
             if len(opt.gpu_ids)>1:
                 static_dict=model.module.state_dict()
             else:
                 static_dict=model.state_dict()
-            torch.save(static_dict,opt.checkpoints_dir+'/'+opt.name+'/{}_trainloss_{:.6f}_train_psnr{:.3f}_train_ssim.pth'.format(epoch,epoch_loss,epoch_psnr,epoch_ssim))
+            torch.save(static_dict,opt.checkpoints_dir+'/'+opt.name+'/{}_trainloss_{:.6f}_train_psnr{:.3f}_train_ssim.pth'.format(epoch,epoch_loss,epoch_psnr3d,epoch_ssim3d))
     train_logger.info('finish training!')
-
 
 
 

@@ -1,5 +1,5 @@
 from torch.nn import MSELoss, SmoothL1Loss, L1Loss
-from dataset import Mayo_Dataset
+from dataset import Mayo_Dataset, DataLoaderTrain
 from torch.utils.data import Dataset, DataLoader
 from util import transforms
 from util.util import create_optimizer,CharbonnierLoss
@@ -10,6 +10,7 @@ import numpy as np
 import os
 from warmup_scheduler import GradualWarmupScheduler
 from litformer import LITFormer
+from glob import glob
 
 
 
@@ -53,14 +54,16 @@ if __name__ == '__main__':
 
  
     opt = TrainOptions().parse()
+    
     device=torch.device('cuda:{}'.format(opt.gpu_ids[0]) if torch.cuda.is_available() else "cpu")
 
-    train_dataset=Mayo_Dataset(opt,transforms=train_transforms)
-    train_dataloader=DataLoader(train_dataset,batch_size=opt.train_batch_size,shuffle=True,num_workers=8)
+    train_dataset=DataLoaderTrain(opt.train_dir, opt.noise_level, opt, transforms=train_transforms)
+    train_dataloader=DataLoader(train_dataset,batch_size=opt.train_batch_size,shuffle=True,num_workers=opt.num_threads)
+    
     if opt.is_val:
         opt.phase='test512'
-        val_dataset=Mayo_Dataset(opt,transforms=val_transforms)
-        val_dataloader=DataLoader(val_dataset,batch_size=opt.test_batch_size,shuffle=False,num_workers=4)
+        val_dataset=DataLoaderTrain(opt.val_dir, opt.noise_level, opt, transforms=train_transforms)
+        val_dataloader=DataLoader(val_dataset,batch_size=opt.test_batch_size,shuffle=False,num_workers=1)
 
 
     model=LITFormer(in_channels=1,out_channels=1,n_channels=64,num_heads_s=[1,2,4,8],num_heads_t=[1,2,4,8],res=True,attention_s=True,attention_t=True).to(device)
@@ -69,6 +72,7 @@ if __name__ == '__main__':
     if len(opt.gpu_ids)>1:
         model=torch.nn.DataParallel(model,device_ids=opt.gpu_ids)
 
+    
 
     loss_fn=CharbonnierLoss()
 

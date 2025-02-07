@@ -11,7 +11,7 @@ import ipdb
 import copy
 from torch.nn.parameter import Parameter
 import numbers
-from einops import rearrange
+from einops import rearrange, repeat
 from torch.nn import init
 import matplotlib.pyplot as plt
 
@@ -319,7 +319,7 @@ class LITFormer(nn.Module):
         output = self.dec2(output, x2)
         output = self.dec3(output, x1)
         output = self.out1(output)+x
-        output = self.depth_up(output)
+        #output = self.depth_up(output)
         output = self.out2(output)
         return output
 

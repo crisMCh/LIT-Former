@@ -9,6 +9,8 @@ import shutil
 from torchmetrics.functional import structural_similarity_index_measure
 from kornia.filters import get_gaussian_kernel2d, filter2d
 import torch.nn.functional as F
+from collections import OrderedDict
+
 
 def mkdirs(paths):
     """create empty directories if they don't exist
@@ -121,9 +123,13 @@ def compute_ssim(img1, img2, window_size=11, reduction: str = "mean", max_val: f
     b,c,z,x,y=img1.shape
     img1=img1.reshape(-1,1,x,y)
     img2=img2.reshape(-1,1,x,y)
+    # Reshape img1 and img2 to match the expected shape for filter2d
+    #img1 = img1.reshape(b * c * z, x, y)
+    #img2 = img2.reshape(b * c * z, x, y)
     C1: float = (0.01 * max_val) ** 2
     C2: float = (0.03 * max_val) ** 2
     tmp_kernel: torch.Tensor = window.to(img1)
+    tmp_kernel = tmp_kernel.squeeze()  # Remove any singleton dimensions
     tmp_kernel = torch.unsqueeze(tmp_kernel, dim=0)
     # compute local mean per channel
     mu1: torch.Tensor = filter2d(img1, tmp_kernel)
@@ -159,9 +165,42 @@ class CharbonnierLoss(nn.Module):
         self.eps = eps
 
     def forward(self, x, y):
-        b, c, t,h, w = y.size()
+        b, c, t, h, w = y.size()
         loss = torch.sum(torch.sqrt((x - y).pow(2) + self.eps**2))
         return loss/(c*b*h*w*t)
 
 def compute_rmse(input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return torch.sqrt(F.mse_loss(input, target))
+
+
+
+def load_checkpoint(model, weights):
+    checkpoint = torch.load(weights)
+    epoch = None  # Default epoch value
+    
+    if "epoch" in checkpoint:
+        epoch = checkpoint["epoch"]  # Extract the epoch information
+    
+    try:
+        model.load_state_dict(checkpoint["state_dict"])
+    except:
+        state_dict = checkpoint["state_dict"]
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            name = k[7:] if 'module.' in k else k  # Remove 'module.' prefix if needed
+            new_state_dict[name] = v
+        model.load_state_dict(new_state_dict)
+    
+    return epoch
+
+
+def load_start_epoch(weights):
+    checkpoint = torch.load(weights)
+    epoch = checkpoint["epoch"]
+    return epoch
+
+def load_optim(optimizer, weights):
+    checkpoint = torch.load(weights)
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    for p in optimizer.param_groups: lr = p['lr']
+    return lr

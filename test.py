@@ -1,4 +1,4 @@
-from dataset import Mayo_Dataset
+from dataset import Mayo_Dataset, DataLoaderTrain
 from torch.utils.data import Dataset, DataLoader
 from util import transforms
 from util.util import create_optimizer,CharbonnierLoss
@@ -9,9 +9,8 @@ import time
 from options.test_options import TestOptions
 import numpy as np
 import os
+from glob import glob
 from litformer import LITFormer
-
-
 
 
 if __name__ == '__main__':
@@ -35,8 +34,8 @@ if __name__ == '__main__':
     device=torch.device('cuda:{}'.format(opt.gpu_ids[0]) if torch.cuda.is_available() else "cpu")
     #device=torch.device("cpu") 
 
-    test_dataset=Mayo_Dataset(opt,transforms=val_transforms)
-    test_dataloader=DataLoader(test_dataset,batch_size=opt.test_batch_size,shuffle=False,num_workers=16)
+    test_dataset=DataLoaderTrain(opt.test_dir,opt.noise_level,opt,transforms=val_transforms)
+    test_dataloader=DataLoader(test_dataset,batch_size=opt.test_batch_size,shuffle=False,num_workers=opt.num_threads)
 
     test_model=LITFormer(in_channels=1,out_channels=1,n_channels=64,num_heads_s=[1,2,4,8],num_heads_t=[1,2,4,8],res=True,attention_s=True,attention_t=True).to(device)
 
@@ -44,12 +43,17 @@ if __name__ == '__main__':
         model=torch.nn.DataParallel(test_model,device_ids=opt.gpu_ids)
 
     model_root=opt.model_path
-    test_model.load_state_dict(torch.load(model_root,map_location='cuda:{}'.format(opt.gpu_ids[0])),strict=False)
+    model_path = glob(os.path.join(model_root, str(opt.checkpoint) + "*"))[0]
+    if model_path is None:
+        raise ValueError(f"No model with checkpoint {opt.checkpoint} found in {model_root}")
+    else:
+        print(f"Restoring at checkpoint {opt.checkpoint} from {model_path}")
+        test_model.load_state_dict(torch.load(model_path,map_location='cuda:{}'.format(opt.gpu_ids[0])),strict=False)
     #test_model.load_state_dict(torch.load(model_root, map_location=lambda storage, loc: storage),strict=False).to(device) #cpu
 
 
-    if opt.rep:
-        test_model=repvgg_model_convert(test_model)
+    #if opt.rep:
+        #test_model=repvgg_model_convert(test_model)
     loss_fn= CharbonnierLoss()
     #loss_fn=MSELoss
     test(

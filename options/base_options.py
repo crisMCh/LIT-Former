@@ -2,6 +2,8 @@ import argparse
 import os
 from util import util
 import torch
+from glob import glob
+
 # import models
 #import data
 
@@ -20,11 +22,11 @@ class BaseOptions():
     def initialize(self, parser):
         """Define the common options that are used in both training and test."""
         # basic parameters
-        parser.add_argument('--dataroot', required=True, help='path to images (should have subfolders trainA, trainB, valA, valB, etc)')
-        parser.add_argument('--name', type=str, default='experiment_name', help='name of the experiment. It decides where to store samples and models')
+        parser.add_argument('--dataroot', required=False, help='path to images (should have subfolders trainA, trainB, valA, valB, etc)')
+        parser.add_argument('--name', type=str, default='LIT', help='name of the experiment. It decides where to store samples and models')
         parser.add_argument('--use_wandb', action='store_true', help='use wandb')
         parser.add_argument('--gpu_ids', type=str, default='0', help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
-        parser.add_argument('--checkpoints_dir', type=str, default='/mnt/data_jixie1/zhchen/MTDformer/checkpoints', help='models are saved here')
+        parser.add_argument('--checkpoints_dir', type=str, default='./results/checkpoints', help='models are saved here')
         parser.add_argument('--phase', type=str, default='train', help='train, val, test, etc')
         # model parameters
         parser.add_argument('--model', type=str, default='cycle_gan', help='chooses which model to use. [cycle_gan | pix2pix | test | colorization]')
@@ -35,8 +37,8 @@ class BaseOptions():
         #parser.add_argument('--init_gain', type=float, default=0.02, help='scaling factor for normal, xavier and orthogonal.')
         parser.add_argument('--no_dropout', action='store_true', help='no dropout for the generator')
         # dataset parameters
-        parser.add_argument('--num_threads', default=4, type=int, help='# threads for loading data')
-        parser.add_argument('--train_batch_size', type=int, default=8, help='input batch size')
+        parser.add_argument('--num_threads', default=1, type=int, help='# threads for loading data')
+        parser.add_argument('--train_batch_size', type=int, default=4, help='input batch size') #------------------ BATCH SIZE
         parser.add_argument('--test_batch_size', type=int, default=1, help='input batch size')
         parser.add_argument('--load_size', type=int, default=286, help='scale images to this size')
         parser.add_argument('--crop_size', type=int, default=256, help='then crop to this size')
@@ -53,8 +55,28 @@ class BaseOptions():
         parser.add_argument('--is_test',action='store_true',default=False,help='test')
         parser.add_argument('--mirror_padding',nargs='+', type=int,default=None,help='test padding')
         parser.add_argument('--layer_order',type=str, default='gcr', help='layer_order')
-        parser.add_argument('--is_val', action='store_true', help='if val')
+        parser.add_argument('--is_val', default = True, action='store_true', help='if validation')
+        
+        #
+        parser.add_argument('--noise_level', type=int, default=20000, help='noise level for training ans testing')
+        parser.add_argument('--multi_slice', action='store_true', default=True, help='2.5D impementation')
+        parser.add_argument('--train_dir', type=str, default ='G:/Cristina/Thesis/Models/Uformer/dataset/lung_tinier/train',  help='dir of train data')
+        parser.add_argument('--val_dir', type=str, default ='G:/Cristina/Thesis/Models/Uformer/dataset/lung_tinier/val',  help='dir of validation data')
+        parser.add_argument('--test_dir', type=str, default ='G:/Cristina/Thesis/Models/Uformer/dataset/lung_tinier/test',  help='dir of validation data')
+        parser.add_argument('--model_path',type=str,default='./results/checkpoints/LIT',help='the model path of testing')
+        parser.add_argument('--checkpoint', type=int, default = 20,  help='checkpoint for testing/resume training') 
+    
+        
+        #plot options
+        parser.add_argument('--norm_range_min', type=float, default=-1024.0)
+        parser.add_argument('--norm_range_max', type=float, default=1000.0) #3072.0
+        
+        parser.add_argument('--trunc_min', type=float, default=-1000)#-160, -1000lung
+        parser.add_argument('--trunc_max', type=float, default=400)#240 #400lung
+
+
         self.initialized = True
+        
         return parser
 
     def gather_options(self):

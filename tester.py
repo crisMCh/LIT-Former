@@ -4,9 +4,13 @@ from torch.nn import MSELoss, SmoothL1Loss, L1Loss
 from torchmetrics.functional import peak_signal_noise_ratio,structural_similarity_index_measure
 import wandb
 from util.util import get_logger,mkdirs,save_images,make_dir,crop_center,ssim_xy,compute_ssim,compute_rmse
-import numpy as np
 import pytorch_ssim
+from util.image_utils import trunc, denormalize_, save_fig, batch_PSNR
+from util.caculate_psnr_ssim import compute_measure
 
+import os 
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 
@@ -23,13 +27,27 @@ def test(opt,model,loss_fn,testloader,device):
     if opt.mirror_padding is not None:
         opt.phase=opt.phase
 
-    test_logger = get_logger('/mnt/data_jixie1/zhchen/MTDformer/test_results/'+opt.name+'.log')
+    ###################################### Cristina's params ######################################
+    # compute PSNR, SSIM, RMSE
+    ori_psnr_avg, ori_ssim_avg, ori_rmse_avg = 0, 0, 0
+    pred_psnr_avg, pred_ssim_avg, pred_rmse_avg = 0, 0, 0
+    ori_psnr_list, ori_ssim_list, ori_rmse_list = [], [], []
+    pred_psnr_list, pred_ssim_list, pred_rmse_list = [], [], []
     
+    # Create directory for saving predictions
+    predictions_dir = os.path.join(opt.save_img_dir, 'predictions', str(opt.name)+'_e'+str(opt.checkpoint)+'_n'+str(opt.noise_level))
+    pred_dir_path = os.path.join(predictions_dir, 'npy')
+    print(pred_dir_path)
+    os.makedirs(pred_dir_path, exist_ok=True)
+
+    ###################################### Cristina's params ######################################
+
+    os.makedirs('./results/test_results/'+opt.name, exist_ok=True)
+    os.makedirs('./results/test_results/'+opt.name+'/'+opt.phase+'-npy', exist_ok=True)
+
+    test_logger = get_logger('./results/test_results/'+opt.name+'.log')
     test_logger.info('start testing!')
-
-    make_dir('/mnt/data_jixie1/zhchen/MTDformer/test_results/'+opt.name)
-    make_dir('/mnt/data_jixie1/zhchen/MTDformer/test_results/'+opt.name+'/'+opt.phase+'-npy')
-
+    
     Lambda=2
 
     up=torch.nn.Upsample(scale_factor=tuple([2.5,1,1]),mode='trilinear')
@@ -46,12 +64,20 @@ def test(opt,model,loss_fn,testloader,device):
     model.eval()
     iters=0
     length=len(testloader.dataset) if opt.num_test==0 else opt.num_test
+    
+
 
     with torch.no_grad():
-        for x, y in tqdm(testloader):
+        psnr_dataset = []
+        psnr_model_init = []
+        for ii, test_val in enumerate(tqdm(testloader), 0):
 
             # if iters >= opt.num_test:  # only apply our model to opt.num_test images.
             #     break
+            x = test_val[0]
+            y = test_val[1]
+            
+            
             x, y = x.to(device), y.to(device)
             y_pred = model(x)
 
@@ -63,8 +89,6 @@ def test(opt,model,loss_fn,testloader,device):
             test_ssim3d=pytorch_ssim.ssim3D(y_pred,y)
             test_ssim2d=compute_ssim(y_pred, y)
             test_rmse=compute_rmse(y_pred, y)
-
-
             test_running_loss += test_loss.item()
             test_running_psnr.append(test_psnr.detach().cpu().numpy())
             test_running_ssim3d.append(test_ssim3d.detach().cpu().numpy())
@@ -76,9 +100,71 @@ def test(opt,model,loss_fn,testloader,device):
                 test_logger.info('processing (%04d)-th image... ' % (iters))
                 test_logger.info('(test_loss: %.6f, test_psnr: %.4f, test_ssim3d: %.4f,test_ssim2d: %.4f,test_rmse: %.6f) ' % (test_loss, test_psnr, test_ssim3d,test_ssim2d,test_rmse))
                 #np.save('/mnt/data_jixie1/zhchen/MTDformer/test_results/'+opt.name+'/'+opt.phase+'-npy/y-pred-'+str('%02d' % iters),y_pred.cpu().detach().numpy())
-                #save_images(torch.clip(y,0,1),root=save_images_root,phase='pred',index=iters,normalize=False)
+                #save_images_root='./results/test_results/'+opt.name
+                #save_images(torch.clip(y_pred,0,1),root=save_images_root,phase='pred',index=iters,normalize=False)
 
             iters+=1
+            
+            ###################################### Cristina's params ######################################
+            # denormalize, truncate
+            H, W = x.shape[-2], x.shape[-1]  # input shape [1, 3, 512, 512]
+            # we're interested only in middle slice shape now: [1, 512, 512]
+            input_ = x[:, :, 1, :, :]
+            target = y[:, :, 1, :, :]
+            restored = y_pred[:, :, 1, :, :]
+            restored_model = y_pred
+            
+            psnr_dataset.append(batch_PSNR(x, y, False).item())
+            psnr_model_init.append(batch_PSNR(y_pred, y, False).item())
+
+            x = trunc(opt, denormalize_(opt, input_.view(H, W).cpu().detach()))
+            y = trunc(opt, denormalize_(opt, target.view(H, W).cpu().detach()))
+            pred = trunc(opt, denormalize_(opt, restored.view(H, W).cpu().detach()))
+
+            os.makedirs(pred_dir_path, exist_ok=True)
+            pred_file_path = os.path.join(pred_dir_path, f'prediction_{iters:04d}.npy')
+            np.save(pred_file_path, pred.numpy())
+
+            data_range = opt.trunc_max - opt.trunc_min
+
+            original_result, pred_result = compute_measure(x, y, pred, data_range)
+
+            ori_psnr_avg += original_result[0]
+            ori_ssim_avg += original_result[1]
+            ori_rmse_avg += original_result[2]
+            pred_psnr_avg += pred_result[0]
+            pred_ssim_avg += pred_result[1]
+            pred_rmse_avg += pred_result[2]
+
+            # Append results to lists
+            ori_psnr_list.append(original_result[0])
+            ori_ssim_list.append(original_result[1])
+            ori_rmse_list.append(original_result[2])
+            pred_psnr_list.append(pred_result[0])
+            pred_ssim_list.append(pred_result[1])
+            pred_rmse_list.append(pred_result[2])
+            if opt.save_images:
+                save_fig(opt, x, y, pred, ii, original_result, pred_result, predictions_dir)
+                # Save comparison figure
+                       
+                # comparison_fig, comparison_ax = plt.subplots(1, 3, figsize=(30, 10))
+                # comparison_ax[0].imshow(trunc(opt, denormalize_(opt, restored_model[:, :, 0, :, :].view(H, W).cpu().detach())), cmap=plt.cm.gray, vmin=opt.trunc_min, vmax=opt.trunc_max)
+                # comparison_ax[0].set_title('prev', fontsize=30)
+                # comparison_ax[1].imshow(trunc(opt, denormalize_(opt, restored_model[:, :, 1, :, :].view(H, W).cpu().detach())), cmap=plt.cm.gray, vmin=opt.trunc_min, vmax=opt.trunc_max)
+                # comparison_ax[1].set_title('Middle slice', fontsize=30)
+                # comparison_ax[2].imshow(trunc(opt, denormalize_(opt, restored_model[:, :, 2, :, :].view(H, W).cpu().detach())), cmap=plt.cm.gray, vmin=opt.trunc_min, vmax=opt.trunc_max)
+                # comparison_ax[2].set_title('next', fontsize=30)
+        
+                # comparison_fig_path = os.path.join(predictions_dir,"fig", f'comparison_{ii:04d}.png')
+                # comparison_fig.savefig(comparison_fig_path)
+                # plt.close(comparison_fig)
+                # #print(f"Fig {ii} exported")
+            
+        psnr_dataset = sum(psnr_dataset)/length
+        psnr_model_init = sum(psnr_model_init)/length
+        print('Input & GT (PSNR) -->%.4f dB'%(psnr_dataset), ', Model_init & GT (PSNR) -->%.4f dB'%(psnr_model_init))
+
+
 
     average_test_loss = test_running_loss /length*opt.test_batch_size
     average_test_psnr= np.mean(test_running_psnr)
